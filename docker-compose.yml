@@ -1,0 +1,9 @@
+version: '3.8'
+
+services:
+  kermanode:
+    build: .
+    container_name: kerma-node
+    ports:
+      - "18018:18018"
+    restart: always
