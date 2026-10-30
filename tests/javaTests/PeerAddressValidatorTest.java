@@ -1,3 +1,4 @@
+package javaTests;
 
 import Validator.PeerAddressValidator;
 import org.junit.jupiter.api.Test;

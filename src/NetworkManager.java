@@ -1,4 +1,6 @@
 import Dto.PeersDto;
+import Dto.TransactionDto;
+import Utils.HashUtils;
 import Validator.PeerAddressValidator;
 import Validator.HelloValidator;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -16,7 +18,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
@@ -25,9 +29,12 @@ import com.fasterxml.jackson.databind.JsonNode;
 public class NetworkManager {
   private final int port = 18018;
   private static final String PEER_FILE_PATH = "peers.json";
+  private static final String OBJECTS_FILE_PATH = "objects.json";
   private Set<String> knownPeers = loadPeers();
+  private Map<String, TransactionDto> knownObjectsMap = loadObjects();
   private final Set<String> activeConnections = ConcurrentHashMap.newKeySet();
-  private final ObjectMapper objectMapper = new ObjectMapper();
+  private Set<PrintWriter> activeConnectionsWriters = ConcurrentHashMap.newKeySet();
+  private static final ObjectMapper objectMapper = new ObjectMapper();
   private final String selfAddress = "9.205.248.253:18018";
   public void start() {
     new Thread(this::connectToBootstrap).start();
@@ -111,13 +118,16 @@ public class NetworkManager {
   }
 
   private void handlePeerConnection(Socket socket) {
+    PrintWriter writer = null;
     try {
       BufferedReader reader = new BufferedReader(new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8));
-      PrintWriter writer = new PrintWriter(new OutputStreamWriter(socket.getOutputStream(), StandardCharsets.UTF_8), true);
+      writer = new PrintWriter(new OutputStreamWriter(socket.getOutputStream(), StandardCharsets.UTF_8), true);
 
       if(!handleHelloMsg(socket, reader, writer)) {
         return;
       }
+
+      activeConnectionsWriters.add(writer);
 
       String line;
       while (!socket.isClosed() && (line = reader.readLine()) != null) {
@@ -132,7 +142,12 @@ public class NetworkManager {
       System.out.println("Connection error with peer: " + e.getMessage());
     }
     finally{
-      try { socket.close(); } catch (IOException ignored) {}
+      try {
+        if (writer != null) {
+          activeConnectionsWriters.remove(writer);
+        }
+        socket.close();
+      } catch (IOException ignored) {}
     }
   }
 
@@ -215,6 +230,15 @@ public class NetworkManager {
           handlePeersMsg(socket, writer, json);
           break;
 
+        case "getobject":
+          handleGetObjectMsg(socket, writer, json);
+          break;
+        case "ihaveobject":
+          handleIhaveObjectMsg(socket, writer, json);
+          break;
+        case "object":
+          handleObjectMsg(socket, writer, json);
+          break;
         default:
           break;
       }
@@ -242,7 +266,7 @@ public class NetworkManager {
 
         PeersDto dto = objectMapper.treeToValue(json, PeersDto.class);
 
-        knownPeers.addAll(dto.peers);
+        knownPeers.addAll(dto.peers); //TODO add checks so it never has more than 30 entries
         savePeers(knownPeers);
 
         System.out.println("Saved " + dto.peers.size() + " peers.");
@@ -276,7 +300,43 @@ public class NetworkManager {
     writer.flush();
   }
 
-  public static void savePeers(Set<String> peers) {
+  private void handleIhaveObjectMsg(Socket socket, PrintWriter writer, JsonNode json) {
+
+  }
+
+  private void handleGetObjectMsg(Socket socket, PrintWriter writer, JsonNode json) {
+
+  }
+
+  private void handleObjectMsg(Socket socket, PrintWriter writer, JsonNode json) {
+    try {
+      //this object can be casted, check the JacksonDeductionForTransactionTest to understand how this works, before being pasted to the validator
+      TransactionDto transactionDto = objectMapper.treeToValue(json.get("object"), TransactionDto.class);
+      if (transactionDto == null) {
+        sendError(writer, "INVALID_FORMAT", "Invalid object message");
+      }
+
+      //TODO: Add validations here
+
+      byte[] payload = objectMapper.writeValueAsBytes(json.get("object"));
+      String hash = HashUtils.computeBlake2sHash(payload);
+
+      if (!knownObjectsMap.containsKey(hash)) {
+        knownObjectsMap.put(hash, transactionDto); //TODO: Check if there is a limit of entries
+        saveObjects(knownObjectsMap);
+        broadcastObjectMsg();
+      }
+    } catch (IOException e) {
+      sendError(writer, "INVALID_FORMAT", "IO parsing error occurred");
+      try { socket.close(); } catch (IOException ignored) {}
+    }
+  }
+
+  private void broadcastObjectMsg() {
+    //use the activeConnectionsWriters object to get the writer instances for active connections
+  }
+
+  private static void savePeers(Set<String> peers) {
     try {
       Files.write(Path.of(PEER_FILE_PATH), peers);
     } catch (IOException e) {
@@ -284,13 +344,26 @@ public class NetworkManager {
     }
   }
 
-  public static Set<String> loadPeers() {
+  //here we basically delete the file and write to it again with new entries, so it's safe regarding duplicates, same applies to savePeers
+   private static void saveObjects(Map<String, TransactionDto> objects) {
+    try {
+      List<String> lines = new ArrayList<>();
+      for (Map.Entry<String, TransactionDto> e : objects.entrySet()) {
+        lines.add(objectMapper.writeValueAsString(Map.of("objectId", e.getKey(), "objectValue", e.getValue())));
+      }
+      Files.write(Path.of(OBJECTS_FILE_PATH), lines);
+    } catch (IOException e) {
+      System.err.println("Could not save objects to disk: " + e.getMessage());
+    }
+  }
+
+  private static Set<String> loadPeers() {
     Set<String> peers = ConcurrentHashMap.newKeySet();
     File file = new File(PEER_FILE_PATH);
 
     if (file.exists()) {
       try {
-        java.util.List<String> lines = Files.readAllLines(Path.of(PEER_FILE_PATH));
+        List<String> lines = Files.readAllLines(Path.of(PEER_FILE_PATH));
         peers.addAll(lines);
         System.out.println("Loaded " + peers.size() + " peers from disk.");
       } catch (IOException e) {
@@ -298,6 +371,28 @@ public class NetworkManager {
       }
     }
     return peers;
+  }
+
+  private static Map<String, TransactionDto> loadObjects() {
+    Map<String, TransactionDto> objects = new ConcurrentHashMap<>();
+    File file = new File(OBJECTS_FILE_PATH);
+
+    if (file.exists()) {
+      try {
+        List<String> lines = Files.readAllLines(Path.of(OBJECTS_FILE_PATH));
+        for (String line : lines) {
+          if (line.isBlank()) {
+            continue;
+          }
+          JsonNode jsonNode = objectMapper.readTree(line);
+          objects.put(jsonNode.get("objectId").asText(), objectMapper.treeToValue(jsonNode.get("objectValue"), TransactionDto.class));
+        }
+        System.out.println("Loaded " + objects.size() + " objects from disk.");
+      } catch (IOException e) {
+        System.err.println("Could not load stored objects: " + e.getMessage());
+      }
+    }
+    return objects;
   }
 
   private void sendError(PrintWriter writer, String name, String msg) {
