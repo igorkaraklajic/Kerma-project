@@ -3,6 +3,7 @@ import Dto.TransactionDto;
 import Utils.HashUtils;
 import Validator.PeerAddressValidator;
 import Validator.HelloValidator;
+import Validator.TransactionValidator;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.io.BufferedReader;
@@ -314,17 +315,33 @@ public class NetworkManager {
       TransactionDto transactionDto = objectMapper.treeToValue(json.get("object"), TransactionDto.class);
       if (transactionDto == null) {
         sendError(writer, "INVALID_FORMAT", "Invalid object message");
+        try { socket.close(); } catch (IOException ignored) {}
+        return;
       }
 
       //TODO: Add validations here
+      int status = TransactionValidator.isValidTransaction(json.get("object"), knownObjectsMap);
 
-      byte[] payload = objectMapper.writeValueAsBytes(json.get("object"));
-      String hash = HashUtils.computeBlake2sHash(payload);
+      switch (status) {
+        case 0:
+          sendError(writer, "INVALID_FORMAT", "Invalid transaction validation");
+          try { socket.close(); } catch (IOException ignored) {}
+          break;
+        case -1:
+          sendError(writer, "UNKNOWN_OBJECT", "Transaction object not found");
+          break;
+        case 1:
+          byte[] payload = objectMapper.writeValueAsBytes(json.get("object"));
+          String hash = HashUtils.computeBlake2sHash(payload);
 
-      if (!knownObjectsMap.containsKey(hash)) {
-        knownObjectsMap.put(hash, transactionDto); //TODO: Check if there is a limit of entries
-        saveObjects(knownObjectsMap);
-        broadcastObjectMsg();
+          if (!knownObjectsMap.containsKey(hash)) {
+            knownObjectsMap.put(hash, transactionDto); //TODO: Check if there is a limit of entries
+            saveObjects(knownObjectsMap);
+            broadcastObjectMsg();
+          }
+          break;
+        default:
+          break;
       }
     } catch (IOException e) {
       sendError(writer, "INVALID_FORMAT", "IO parsing error occurred");
