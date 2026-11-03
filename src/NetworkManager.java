@@ -302,11 +302,55 @@ public class NetworkManager {
   }
 
   private void handleIhaveObjectMsg(Socket socket, PrintWriter writer, JsonNode json) {
+    if (json.size() != 2 || !json.path("objectid").isTextual() || !json.get("objectid").asText().matches("[0-9a-f]{64}")) {
+      sendError(writer, "INVALID_FORMAT", "Invalid ihaveobject message");
+      try {
+        socket.close();
+      }
+      catch (IOException ignored) {}
+      return;
+    }
 
+    String objectId = json.get("objectid").asText();
+    if (knownObjectsMap.containsKey(objectId)) {
+      return;
+    }
+
+    var request = objectMapper.createObjectNode();
+    request.put("type", "getobject");
+    request.put("objectid", objectId);
+    try {
+      writer.println(objectMapper.writeValueAsString(request));
+    } catch (IOException e) {
+      System.err.println("Could not send getobject: " + e.getMessage());
+    }
   }
 
   private void handleGetObjectMsg(Socket socket, PrintWriter writer, JsonNode json) {
+    if (json.size() != 2 || !json.path("objectid").isTextual() || !json.get("objectid").asText().matches("[0-9a-f]{64}")) {
+      sendError(writer, "INVALID_FORMAT", "Invalid getobject message");
+      try {
+        socket.close();
+      }
+      catch (IOException ignored) {}
+      return;
+    }
 
+    String objectId = json.get("objectid").asText();
+    TransactionDto object = knownObjectsMap.get(objectId);
+    if (object == null) {
+      sendError(writer, "UNKNOWN_OBJECT", "Requested object is not known");
+      return;
+    }
+
+    var response = objectMapper.createObjectNode();
+    response.put("type", "object");
+    response.set("object", objectMapper.valueToTree(object));
+    try {
+      writer.println(objectMapper.writeValueAsString(response));
+    } catch (IOException e) {
+      System.err.println("Could not send object: " + e.getMessage());
+    }
   }
 
   private void handleObjectMsg(Socket socket, PrintWriter writer, JsonNode json) {
@@ -349,7 +393,7 @@ public class NetworkManager {
           if (!knownObjectsMap.containsKey(hash)) {
             knownObjectsMap.put(hash, transactionDto); //TODO: Check if there is a limit of entries
             saveObjects(knownObjectsMap);
-            broadcastObjectMsg();
+            broadcastObjectMsg(hash);
           }
           break;
         default:
@@ -361,8 +405,21 @@ public class NetworkManager {
     }
   }
 
-  private void broadcastObjectMsg() {
-    //use the activeConnectionsWriters object to get the writer instances for active connections
+  private void broadcastObjectMsg(String objectId) {
+    var message = objectMapper.createObjectNode();
+    message.put("type", "ihaveobject");
+    message.put("objectid", objectId);
+
+    try {
+      String announcement = objectMapper.writeValueAsString(message);
+      for (PrintWriter peerWriter : activeConnectionsWriters) {
+        synchronized (peerWriter) {
+          peerWriter.println(announcement);
+        }
+      }
+    } catch (IOException e) {
+      System.err.println("Could not broadcast object: " + e.getMessage());
+    }
   }
 
   private static void savePeers(Set<String> peers) {
