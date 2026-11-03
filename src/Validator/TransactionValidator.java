@@ -21,9 +21,12 @@ public final class TransactionValidator {
   private static final Pattern HEX_64 = Pattern.compile("^[0-9a-fA-F]{64}$");
   private static final Pattern HEX_128 = Pattern.compile("^[0-9a-fA-F]{128}$");
 
-  private static final int VALID = 1;
-  private static final int INVALID_FORMAT = 0;
+  private static final int VALID = 0;
   private static final int UNKNOWN_OBJECT = -1;
+  private static final int INVALID_FORMAT = 1;
+  private static final int INVALID_TX_OUTPOINT = 2;
+  private static final int INVALID_TX_CONSERVATION = 3;
+  private static final int INVALID_TX_SIGNATURE = 4;
 
   public static int isValidTransaction(JsonNode node, Map<String, TransactionDto> knownObjMap) {
     if(node == null || !node.isObject()) {
@@ -78,7 +81,7 @@ public final class TransactionValidator {
                 }
                 OutputData refOutput = getOutputAt(refDto, index);
                 if (refOutput == null) {
-                    return INVALID_FORMAT;
+                    return INVALID_TX_OUTPOINT;
                 }
 
                 sumInputValues += refOutput.value();
@@ -88,7 +91,7 @@ public final class TransactionValidator {
                 }
 
                 if(!SignatureUtils.verifySignature(plaintextBytes, input.sig(), refOutput.pubkey())) {
-                    return INVALID_FORMAT;
+                    return INVALID_TX_SIGNATURE;
                 }
             }
 
@@ -97,7 +100,7 @@ public final class TransactionValidator {
                 sumOutputValues += outputs.value();
             }
             if(sumInputValues < sumOutputValues) {
-                return INVALID_FORMAT;
+                return INVALID_TX_CONSERVATION;
             }
             return VALID;
         }

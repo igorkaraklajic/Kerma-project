@@ -323,14 +323,26 @@ public class NetworkManager {
       int status = TransactionValidator.isValidTransaction(json.get("object"), knownObjectsMap);
 
       switch (status) {
-        case 0:
-          sendError(writer, "INVALID_FORMAT", "Invalid transaction validation");
+        case 1:
+          sendError(writer, "INVALID_FORMAT", "Invalid transaction format");
+          try { socket.close(); } catch (IOException ignored) {}
+          break;
+        case 2:
+          sendError(writer, "INVALID_TX_OUTPOINT", "Outpoint index not found");
+          try { socket.close(); } catch (IOException ignored) {}
+          break;
+        case 3:
+          sendError(writer, "INVALID_TX_CONSERVATION", "Sum of inputs is less than sum of outputs");
+          try { socket.close(); } catch (IOException ignored) {}
+          break;
+        case 4:
+          sendError(writer, "INVALID_TX_SIGNATURE", "Signature verification failed");
           try { socket.close(); } catch (IOException ignored) {}
           break;
         case -1:
           sendError(writer, "UNKNOWN_OBJECT", "Transaction object not found");
           break;
-        case 1:
+        case 0:
           byte[] payload = objectMapper.writeValueAsBytes(json.get("object"));
           String hash = HashUtils.computeBlake2sHash(payload);
 
