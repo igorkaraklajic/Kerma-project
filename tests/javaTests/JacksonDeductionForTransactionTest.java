@@ -6,6 +6,8 @@ import Dto.NormalTransaction.NormalTransactionFields;
 import Dto.NormalTransaction.NormalTransactionInputs;
 import Dto.NormalTransaction.NormalTransactionOutputs;
 import Dto.TransactionDto;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
@@ -95,5 +97,13 @@ public class JacksonDeductionForTransactionTest {
     assertEquals(49999999999990L, outputs[1].value());
 
     assertEquals("transaction", normalTransactionFields.type());
+  }
+
+  @Test
+  void givenAMalformedNormalTransaction_whenMapping_thenExpectAnException() throws JsonProcessingException {
+    String normalTransactionJson = "{\"object\":{\"inputs\":[{\"outpoint\":{\"index\":0,\"txid\":\"7a9708bc2ae76073118566232e1552ebb28193e38994324d3f5fceae78ddfa01\"},\"sig\":\"cdf0fc6e82fbadb1d1f3d51a152bfe8bb25db28db140b908132fc33c295970aad474c57d0a543204f879ab4ac05a6c8cab108a953c96e9d0fb4bd2773227310e\"}],\"outputs\":[{\"pubkey\":\"7a2ff7d5914429d5cf6d5ce1f1758d65bd595089dd5f3807d280d4fcd07bccb4\"}],\"type\":\"transaction\"},\"type\":\"object\"}";
+    ObjectMapper objectMapper = new ObjectMapper().configure(DeserializationFeature.FAIL_ON_MISSING_CREATOR_PROPERTIES, true);
+    JsonNode root = objectMapper.readTree(normalTransactionJson);
+    assertThrows(JsonProcessingException.class, () -> objectMapper.treeToValue(root.get("object"), TransactionDto.class));
   }
 }

@@ -1,3 +1,6 @@
 package Dto.NormalTransaction;
 
-public record NormalTransactionOutputs (String pubkey, long value){}
+import com.fasterxml.jackson.annotation.JsonProperty;
+
+public record NormalTransactionOutputs (@JsonProperty(value = "pubkey", required = true) String pubkey,
+                                        @JsonProperty(value = "value", required = true) long value){}

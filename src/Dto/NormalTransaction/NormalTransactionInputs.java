@@ -1,3 +1,6 @@
 package Dto.NormalTransaction;
 
-public record NormalTransactionInputs (NormalTransactionInputsOutpoint outpoint, String sig){}
+import com.fasterxml.jackson.annotation.JsonProperty;
+
+public record NormalTransactionInputs (@JsonProperty(value = "outpoint", required = true) NormalTransactionInputsOutpoint outpoint,
+                                       @JsonProperty(value = "sig", required = true) String sig){}

@@ -1,3 +1,6 @@
 package Dto.NormalTransaction;
 
-public record NormalTransactionInputsOutpoint (int index, String txid){}
+import com.fasterxml.jackson.annotation.JsonProperty;
+
+public record NormalTransactionInputsOutpoint (@JsonProperty(value = "index", required = true) int index,
+                                               @JsonProperty(value = "txid", required = true) String txid){}

@@ -4,6 +4,7 @@ import Utils.HashUtils;
 import Validator.PeerAddressValidator;
 import Validator.HelloValidator;
 import Validator.TransactionValidator;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.io.BufferedReader;
@@ -35,7 +36,7 @@ public class NetworkManager {
   private Map<String, TransactionDto> knownObjectsMap = loadObjects();
   private final Set<String> activeConnections = ConcurrentHashMap.newKeySet();
   private Set<PrintWriter> activeConnectionsWriters = ConcurrentHashMap.newKeySet();
-  private static final ObjectMapper objectMapper = new ObjectMapper();
+  private static final ObjectMapper objectMapper = new ObjectMapper().configure(DeserializationFeature.FAIL_ON_MISSING_CREATOR_PROPERTIES, true);
   private final String selfAddress = "9.205.248.253:18018";
   public void start() {
     new Thread(this::connectToBootstrap).start();
@@ -355,7 +356,6 @@ public class NetworkManager {
 
   private void handleObjectMsg(Socket socket, PrintWriter writer, JsonNode json) {
     try {
-      //this object can be casted, check the JacksonDeductionForTransactionTest to understand how this works, before being pasted to the validator
       TransactionDto transactionDto = objectMapper.treeToValue(json.get("object"), TransactionDto.class);
       if (transactionDto == null) {
         sendError(writer, "INVALID_FORMAT", "Invalid object message");
@@ -363,7 +363,6 @@ public class NetworkManager {
         return;
       }
 
-      //TODO: Add validations here
       int status = TransactionValidator.isValidTransaction(json.get("object"), knownObjectsMap);
 
       switch (status) {

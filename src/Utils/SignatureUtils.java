@@ -5,7 +5,6 @@ import org.bouncycastle.crypto.params.Ed25519PublicKeyParameters;
 import org.bouncycastle.crypto.signers.Ed25519Signer;
 public class SignatureUtils {
 
-  //TODO: Check if the method is correct, it was written before task 2 it's based on the protocol description
   public static boolean verifySignature(byte[] data, String signature, String publicKey) {
     try {
       byte[] publicKeyBytes = Hex.decode(publicKey);
