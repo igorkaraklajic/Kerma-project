@@ -1,6 +1,6 @@
-package Dto.NormalTransaction;
+package Kerma.Dto.NormalTransaction;
 
-import Dto.TransactionDto;
+import Kerma.Dto.TransactionDto;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 public record NormalTransactionFields (@JsonProperty(value = "inputs", required = true) NormalTransactionInputs[] inputs,

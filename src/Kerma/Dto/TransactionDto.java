@@ -1,7 +1,7 @@
-package Dto;
+package Kerma.Dto;
 
-import Dto.CoinbaseTransaction.CoinbaseTransactionFields;
-import Dto.NormalTransaction.NormalTransactionFields;
+import Kerma.Dto.CoinbaseTransaction.CoinbaseTransactionFields;
+import Kerma.Dto.NormalTransaction.NormalTransactionFields;
 import com.fasterxml.jackson.annotation.JsonSubTypes;
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
 

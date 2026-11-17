@@ -10,4 +10,4 @@ WORKDIR /app
 COPY --from=build /app/lib ./lib
 COPY --from=build /app/out ./out
 EXPOSE 18018
-CMD ["java", "-cp", "out:lib/*", "Main"]
+CMD ["java", "-cp", "out:lib/*", "Kerma.Main"]

@@ -1,6 +1,6 @@
 package javaTests;
 
-import Validator.PeerAddressValidator;
+import Kerma.Validator.PeerAddressValidator;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.*;

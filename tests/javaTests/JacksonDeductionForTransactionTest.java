@@ -1,11 +1,11 @@
 package javaTests;
 
-import Dto.CoinbaseTransaction.CoinbaseTransactionFields;
-import Dto.CoinbaseTransaction.CoinbaseTransactionOutputs;
-import Dto.NormalTransaction.NormalTransactionFields;
-import Dto.NormalTransaction.NormalTransactionInputs;
-import Dto.NormalTransaction.NormalTransactionOutputs;
-import Dto.TransactionDto;
+import Kerma.Dto.CoinbaseTransaction.CoinbaseTransactionFields;
+import Kerma.Dto.CoinbaseTransaction.CoinbaseTransactionOutputs;
+import Kerma.Dto.NormalTransaction.NormalTransactionFields;
+import Kerma.Dto.NormalTransaction.NormalTransactionInputs;
+import Kerma.Dto.NormalTransaction.NormalTransactionOutputs;
+import Kerma.Dto.TransactionDto;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;

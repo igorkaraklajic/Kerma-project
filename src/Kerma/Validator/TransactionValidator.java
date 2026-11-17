@@ -1,13 +1,11 @@
-package Validator;
+package Kerma.Validator;
 
-import Dto.CoinbaseTransaction.CoinbaseTransactionFields;
-import Dto.CoinbaseTransaction.CoinbaseTransactionOutputs;
-import Dto.NormalTransaction.NormalTransactionFields;
-import Dto.NormalTransaction.NormalTransactionInputs;
-import Dto.NormalTransaction.NormalTransactionInputsOutpoint;
-import Dto.NormalTransaction.NormalTransactionOutputs;
-import Dto.TransactionDto;
-import Utils.SignatureUtils;
+import Kerma.Dto.CoinbaseTransaction.CoinbaseTransactionFields;
+import Kerma.Dto.CoinbaseTransaction.CoinbaseTransactionOutputs;
+import Kerma.Dto.NormalTransaction.NormalTransactionFields;
+import Kerma.Dto.NormalTransaction.NormalTransactionOutputs;
+import Kerma.Dto.TransactionDto;
+import Kerma.Utils.SignatureUtils;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -16,7 +14,6 @@ import java.util.Map;
 import java.util.regex.Pattern;
 
 public final class TransactionValidator {
-  //TODO: Add one/two methods with complete validation for the concrete type of transaction
   private static final ObjectMapper objectMapper = new ObjectMapper();
   private static final Pattern HEX_64 = Pattern.compile("^[0-9a-fA-F]{64}$");
   private static final Pattern HEX_128 = Pattern.compile("^[0-9a-fA-F]{128}$");

@@ -1,4 +1,4 @@
-package Utils;
+package Kerma.Utils;
 
 import java.security.MessageDigest;
 import java.security.Security;

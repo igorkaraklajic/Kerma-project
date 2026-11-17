@@ -1,4 +1,4 @@
-package Dto.NormalTransaction;
+package Kerma.Dto.NormalTransaction;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 

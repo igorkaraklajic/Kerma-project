@@ -1,6 +1,6 @@
 package javaTests;
 
-import Utils.HashUtils;
+import Kerma.Utils.HashUtils;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;

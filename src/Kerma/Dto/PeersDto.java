@@ -1,4 +1,4 @@
-package Dto;
+package Kerma.Dto;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 

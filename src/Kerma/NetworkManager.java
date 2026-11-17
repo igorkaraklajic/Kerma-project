@@ -1,10 +1,14 @@
-import Dto.PeersDto;
-import Dto.TransactionDto;
-import Utils.HashUtils;
-import Validator.PeerAddressValidator;
-import Validator.HelloValidator;
-import Validator.TransactionValidator;
-import com.fasterxml.jackson.databind.DeserializationFeature;
+package Kerma;
+
+import Kerma.Dto.BlockDto;
+import Kerma.Dto.Pair;
+import Kerma.Dto.PeersDto;
+import Kerma.Dto.TransactionDto;
+import Kerma.Utils.HashUtils;
+import Kerma.Validator.BlockValidator;
+import Kerma.Validator.PeerAddressValidator;
+import Kerma.Validator.HelloValidator;
+import Kerma.Validator.TransactionValidator;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.io.BufferedReader;
@@ -20,7 +24,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -36,7 +39,9 @@ public class NetworkManager {
   private Map<String, TransactionDto> knownObjectsMap = loadObjects();
   private final Set<String> activeConnections = ConcurrentHashMap.newKeySet();
   private Set<PrintWriter> activeConnectionsWriters = ConcurrentHashMap.newKeySet();
-  private static final ObjectMapper objectMapper = new ObjectMapper().configure(DeserializationFeature.FAIL_ON_MISSING_CREATOR_PROPERTIES, true);
+  private Map<String, Pair> activeConnectionsMap = new ConcurrentHashMap<>();
+  private Map<String, BlockDto> knownBlocksMap = new ConcurrentHashMap<>();
+  private static final ObjectMapper objectMapper = new ObjectMapper();
   private final String selfAddress = "9.205.248.253:18018";
   public void start() {
     new Thread(this::connectToBootstrap).start();
@@ -83,17 +88,21 @@ public class NetworkManager {
             int peerPort = address.port();
 
             activeConnections.add(peer);
-
             new Thread(() -> {
               try {
                 System.out.println("Attempting to connect to: " + peer);
                 Socket socket = new Socket(host, peerPort);
+                BufferedReader reader = new BufferedReader(new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8));
+                PrintWriter writer = new PrintWriter(new OutputStreamWriter(socket.getOutputStream(), StandardCharsets.UTF_8), true);
+
+                activeConnectionsMap.put(peer, new Pair(reader, writer, socket));
                 handlePeerConnection(socket);
               } catch (IOException e) {
                 System.out.println("Connection failed to " + peer + ", picking another peer");
                 knownPeers.remove(peer);
               } finally {
                 activeConnections.remove(peer);
+                activeConnectionsMap.remove(peer);
               }
             }).start();
           }
@@ -200,7 +209,7 @@ public class NetworkManager {
     writer.flush();
   }
 
-  private void processMessage(Socket socket, PrintWriter writer, String line) {
+  public void processMessage(Socket socket, PrintWriter writer, String line) {
     try {
       JsonNode json = objectMapper.readTree(line);
 
@@ -355,6 +364,19 @@ public class NetworkManager {
   }
 
   private void handleObjectMsg(Socket socket, PrintWriter writer, JsonNode json) {
+    String type = json.get("object").path("type").asText();
+    if ("transaction".equals(type)) {
+      handleTransactionObject(socket, writer, json);
+    } else if ("block".equals(type)) {
+      handleBlockObject(socket, writer, json);
+    } else {
+      sendError(writer, "INVALID_FORMAT", "Unknown object type");
+      try {
+        socket.close();
+      } catch (IOException ignored) {}
+    }
+  }
+  private void handleTransactionObject(Socket socket, PrintWriter writer, JsonNode json) {
     try {
       TransactionDto transactionDto = objectMapper.treeToValue(json.get("object"), TransactionDto.class);
       if (transactionDto == null) {
@@ -364,6 +386,59 @@ public class NetworkManager {
       }
 
       int status = TransactionValidator.isValidTransaction(json.get("object"), knownObjectsMap);
+
+      switch (status) {
+        case 1:
+          sendError(writer, "INVALID_FORMAT", "Invalid transaction format");
+          try { socket.close(); } catch (IOException ignored) {}
+          break;
+        case -4:
+          sendError(writer, "UNFINDABLE_OBJECT", "Outpoint index not found");
+          try { socket.close(); } catch (IOException ignored) {}
+          break;
+        case -3:
+          sendError(writer, "INVALID_TX_CONSERVATION", "Sum of inputs is less than sum of outputs");
+          try { socket.close(); } catch (IOException ignored) {}
+          break;
+        case -2:
+          sendError(writer, "UNKNOWN_OBJECT", "Signature verification failed");
+          try { socket.close(); } catch (IOException ignored) {}
+          break;
+        case -1:
+          sendError(writer, "INVALID_BLOCK_POW", "Transaction object not found");
+          break;
+        case 0:
+          byte[] payload = objectMapper.writeValueAsBytes(json.get("object"));
+          String hash = HashUtils.computeBlake2sHash(payload);
+
+          if (!knownObjectsMap.containsKey(hash)) {
+            knownObjectsMap.put(hash, transactionDto); //TODO: Check if there is a limit of entries
+            saveObjects(knownObjectsMap);
+            broadcastObjectMsg(hash);
+          }
+          break;
+        default:
+          break;
+      }
+    } catch (IOException e) {
+      sendError(writer, "INVALID_FORMAT", "IO parsing error occurred");
+      try { socket.close(); } catch (IOException ignored) {}
+    }
+  }
+
+  private void handleBlockObject(Socket socket, PrintWriter writer, JsonNode json) {
+    try {
+      BlockDto blockDto = objectMapper.treeToValue(json.get("object"), BlockDto.class);
+      if (blockDto == null) {
+        sendError(writer, "INVALID_FORMAT", "Invalid object message");
+        try { socket.close(); } catch (IOException ignored) {}
+        return;
+      }
+
+      byte[] payload = objectMapper.writeValueAsBytes(json);
+      String hash = HashUtils.computeBlake2sHash(payload);
+
+      int status = BlockValidator.isBlockValid(blockDto, knownBlocksMap, hash, knownObjectsMap, activeConnectionsMap);
 
       switch (status) {
         case 1:
@@ -386,14 +461,6 @@ public class NetworkManager {
           sendError(writer, "UNKNOWN_OBJECT", "Transaction object not found");
           break;
         case 0:
-          byte[] payload = objectMapper.writeValueAsBytes(json.get("object"));
-          String hash = HashUtils.computeBlake2sHash(payload);
-
-          if (!knownObjectsMap.containsKey(hash)) {
-            knownObjectsMap.put(hash, transactionDto); //TODO: Check if there is a limit of entries
-            saveObjects(knownObjectsMap);
-            broadcastObjectMsg(hash);
-          }
           break;
         default:
           break;

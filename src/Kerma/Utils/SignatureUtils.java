@@ -1,4 +1,4 @@
-package Utils;
+package Kerma.Utils;
 
 import org.bouncycastle.util.encoders.Hex;
 import org.bouncycastle.crypto.params.Ed25519PublicKeyParameters;

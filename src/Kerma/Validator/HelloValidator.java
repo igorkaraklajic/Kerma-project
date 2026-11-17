@@ -1,5 +1,5 @@
-package Validator;
-import Dto.HelloDto;
+package Kerma.Validator;
+import Kerma.Dto.HelloDto;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 

@@ -1,6 +1,6 @@
-package Dto.CoinbaseTransaction;
+package Kerma.Dto.CoinbaseTransaction;
 
-import Dto.TransactionDto;
+import Kerma.Dto.TransactionDto;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 public record CoinbaseTransactionFields (@JsonProperty(value = "height", required = true) int height,

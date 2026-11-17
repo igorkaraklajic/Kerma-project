@@ -1,4 +1,4 @@
-package Dto.CoinbaseTransaction;
+package Kerma.Dto.CoinbaseTransaction;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 
