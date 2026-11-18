@@ -1,6 +1,7 @@
 package Kerma;
 
 import Kerma.Dto.BlockDto;
+import Kerma.Dto.BlockEntry;
 import Kerma.Dto.Pair;
 import Kerma.Dto.PeersDto;
 import Kerma.Dto.TransactionDto;
@@ -24,6 +25,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -40,7 +42,7 @@ public class NetworkManager {
   private final Set<String> activeConnections = ConcurrentHashMap.newKeySet();
   private Set<PrintWriter> activeConnectionsWriters = ConcurrentHashMap.newKeySet();
   private Map<String, Pair> activeConnectionsMap = new ConcurrentHashMap<>();
-  private Map<String, BlockDto> knownBlocksMap = new ConcurrentHashMap<>();
+  private Map<String, BlockEntry> knownBlocksEntryMap = new ConcurrentHashMap<>();
   private static final ObjectMapper objectMapper = new ObjectMapper();
   private final String selfAddress = "9.205.248.253:18018";
   public void start() {
@@ -428,9 +430,9 @@ public class NetworkManager {
 
   private void handleBlockObject(Socket socket, PrintWriter writer, JsonNode json) {
     try {
-      BlockDto blockDto = objectMapper.treeToValue(json.get("object"), BlockDto.class);
-      if (blockDto == null) {
-        sendError(writer, "INVALID_FORMAT", "Invalid object message");
+      BlockDto blockDto = objectMapper.treeToValue(json, BlockDto.class);
+      if (blockDto == null || blockDto.type() == null || !blockDto.type().equals("block")) {
+        sendError(writer, "INVALID_FORMAT", "Invalid object format");
         try { socket.close(); } catch (IOException ignored) {}
         return;
       }
@@ -438,29 +440,42 @@ public class NetworkManager {
       byte[] payload = objectMapper.writeValueAsBytes(json);
       String hash = HashUtils.computeBlake2sHash(payload);
 
-      int status = BlockValidator.isBlockValid(blockDto, knownBlocksMap, hash, knownObjectsMap, activeConnectionsMap);
+      int status = BlockValidator.isBlockValid(blockDto, knownBlocksEntryMap, hash, knownObjectsMap, activeConnectionsMap);
 
       switch (status) {
-        case 1:
-          sendError(writer, "INVALID_FORMAT", "Invalid transaction format");
-          try { socket.close(); } catch (IOException ignored) {}
-          break;
-        case 2:
-          sendError(writer, "INVALID_TX_OUTPOINT", "Outpoint index not found");
-          try { socket.close(); } catch (IOException ignored) {}
-          break;
-        case 3:
-          sendError(writer, "INVALID_TX_CONSERVATION", "Sum of inputs is less than sum of outputs");
-          try { socket.close(); } catch (IOException ignored) {}
-          break;
-        case 4:
-          sendError(writer, "INVALID_TX_SIGNATURE", "Signature verification failed");
-          try { socket.close(); } catch (IOException ignored) {}
-          break;
         case -1:
-          sendError(writer, "UNKNOWN_OBJECT", "Transaction object not found");
+          sendError(writer, "INVALID_GENESIS", "The block attempts to overwrite the genesis block");
+          try { socket.close(); } catch (IOException ignored) {}
+          break;
+        case -2:
+          sendError(writer, "INVALID_FORMAT", "Invalid object format");
+          try { socket.close(); } catch (IOException ignored) {}
+          break;
+        case -3:
+          sendError(writer, "INVALID_BLOCK_POW", "Block " + hash + " does not meet mining target");
+          try { socket.close(); } catch (IOException ignored) {}
+          break;
+        case -4:
+          sendError(writer, "INVALID_BLOCK_TIMESTAMP", "Block " + hash +
+              " contains a timestamp not strictly greater than that of the parent block, or is in the future");
+          try { socket.close(); } catch (IOException ignored) {}
+          break;
+        case -5:
+          sendError(writer, "UNFINDABLE_OBJECT",
+              "The node could not verify an object because it failed to receive a dependent object after 5s");
+          break;
+        case -6:
+          sendError(writer, "INVALID_BLOCK_COINBASE",
+              "a Coinbase transaction was either present at another index other than the first index or invalid");
           break;
         case 0:
+          BlockEntry parentEntry = knownBlocksEntryMap.get(blockDto.previd());
+          int height = (parentEntry != null) ? parentEntry.height() + 1 : 1;
+          //TODO: here comes the creation of the UTXO and together with height, blockDto and the new UTXO set
+          //the knownBlocksEntryMap should be updated with the above placed in a BlockEntry as value and hash as a key, for now i use new HashSet
+          //also check in blockValidator around line 46 a new HashSet is created that maybe needs changing
+          BlockEntry newEntry = new BlockEntry(height, blockDto, new HashSet<>());
+          knownBlocksEntryMap.put(hash, newEntry);
           break;
         default:
           break;
