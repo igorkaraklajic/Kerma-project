@@ -1,4 +1,4 @@
 package Kerma.Dto;
 
-public record UTXO() {
+public record UTXO(String txid, int index) {
 }

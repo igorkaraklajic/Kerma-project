@@ -11,7 +11,7 @@ import Kerma.Validator.PeerAddressValidator;
 import Kerma.Validator.HelloValidator;
 import Kerma.Validator.TransactionValidator;
 import com.fasterxml.jackson.databind.ObjectMapper;
-
+import Kerma.Utils.BlockHashUtils;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
@@ -37,6 +37,7 @@ public class NetworkManager {
   private final int port = 18018;
   private static final String PEER_FILE_PATH = "peers.json";
   private static final String OBJECTS_FILE_PATH = "objects.json";
+  private static final String GENESIS_ID = "00002fa163c7dab0991544424b9fd302bb1782b185e5a3bbdf12afb758e57dee";
   private Set<String> knownPeers = loadPeers();
   private Map<String, TransactionDto> knownObjectsMap = loadObjects();
   private final Set<String> activeConnections = ConcurrentHashMap.newKeySet();
@@ -46,6 +47,8 @@ public class NetworkManager {
   private static final ObjectMapper objectMapper = new ObjectMapper();
   private final String selfAddress = "9.205.248.253:18018";
   public void start() {
+    initGenesis();
+
     new Thread(this::connectToBootstrap).start();
     new Thread(this::discoverPeers).start();
 
@@ -430,15 +433,26 @@ public class NetworkManager {
 
   private void handleBlockObject(Socket socket, PrintWriter writer, JsonNode json) {
     try {
-      BlockDto blockDto = objectMapper.treeToValue(json, BlockDto.class);
+      JsonNode blockNode = json.get("object");
+
+      if (blockNode == null || !blockNode.isObject()) {
+        sendError(writer, "INVALID_FORMAT", "Invalid block object");
+        socket.close();
+        return;
+      }
+      BlockDto blockDto = objectMapper.treeToValue(blockNode, BlockDto.class);
+
       if (blockDto == null || blockDto.type() == null || !blockDto.type().equals("block")) {
         sendError(writer, "INVALID_FORMAT", "Invalid object format");
         try { socket.close(); } catch (IOException ignored) {}
         return;
       }
 
-      byte[] payload = objectMapper.writeValueAsBytes(json);
-      String hash = HashUtils.computeBlake2sHash(payload);
+      String hash = BlockHashUtils.computeBlockId(blockNode);
+
+      if (knownBlocksEntryMap.containsKey(hash)) {
+        return;
+      }
 
       int status = BlockValidator.isBlockValid(blockDto, knownBlocksEntryMap, hash, knownObjectsMap, activeConnectionsMap);
 
@@ -574,6 +588,42 @@ public class NetworkManager {
 
     } catch (IOException e) {
       System.err.println("Could not send error: " + e.getMessage());
+    }
+  }
+  private void initGenesis() {
+    try {
+      BlockDto genesis = new BlockDto(
+              "0000abc000000000000000000000000000000000000000000000000000000000",
+              1671062400L,
+              "Marabu",
+              "00000000000000000000000000000000000000000000000000000000005bb0f2",
+              "The New York Times 2022-12-13: Scientists Achieve Nuclear Fusion Breakthrough With Blast of 192 Lasers",
+              null,
+              new String[0],
+              "block"
+      );
+
+      JsonNode genesisJson = objectMapper.valueToTree(genesis);
+
+      String hash = BlockHashUtils.computeBlockId(genesisJson);
+
+      if (!GENESIS_ID.equals(hash)) {
+        throw new IllegalStateException(
+                "Genesis hash does not match: " + hash
+        );
+      }
+
+      knownBlocksEntryMap.put(
+              GENESIS_ID,
+              new BlockEntry(0, genesis, new HashSet<>())
+      );
+
+      System.out.println("Genesis block initialized");
+
+    } catch (IOException e) {
+      throw new IllegalStateException(
+              "Failed to initialize genesis block", e
+      );
     }
   }
 }

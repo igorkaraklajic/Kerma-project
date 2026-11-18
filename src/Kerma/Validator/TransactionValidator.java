@@ -12,6 +12,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import java.util.Map;
 import java.util.regex.Pattern;
+import java.math.BigInteger;
 
 public final class TransactionValidator {
   private static final ObjectMapper objectMapper = new ObjectMapper();
@@ -61,7 +62,7 @@ public final class TransactionValidator {
             }
             byte[] plaintextBytes = objectMapper.writeValueAsBytes(txCopy);
 
-            long sumInputValues = 0;
+            BigInteger sumInputValues = BigInteger.ZERO;
             for (var input : normal.inputs()) {
                 if(input.outpoint() == null || input.outpoint().txid() == null || input.outpoint().index() < 0) {
                     return INVALID_FORMAT;
@@ -81,7 +82,7 @@ public final class TransactionValidator {
                     return INVALID_TX_OUTPOINT;
                 }
 
-                sumInputValues += refOutput.value();
+                sumInputValues = sumInputValues.add(refOutput.value());
 
                 if(input.sig() == null || !HEX_128.matcher(input.sig()).matches()) {
                     return INVALID_FORMAT;
@@ -92,11 +93,11 @@ public final class TransactionValidator {
                 }
             }
 
-            long sumOutputValues = 0;
+            BigInteger sumOutputValues = BigInteger.ZERO;
             for (NormalTransactionOutputs outputs : normal.outputs()){
-                sumOutputValues += outputs.value();
+                sumOutputValues = sumInputValues.add(outputs.value());
             }
-            if(sumInputValues < sumOutputValues) {
+            if(sumInputValues.compareTo(sumOutputValues) < 0) {
                 return INVALID_TX_CONSERVATION;
             }
             return VALID;
@@ -112,7 +113,7 @@ public final class TransactionValidator {
           return false;
       }
       for (CoinbaseTransactionOutputs out : outputs) {
-          if(out == null || out.pubkey() == null || out.value() < 0 || !HEX_64.matcher(out.pubkey()).matches()) {
+          if(out == null || out.pubkey() == null || out.value().signum() < 0 || !HEX_64.matcher(out.pubkey()).matches()) {
               return false;
           }
       }
@@ -123,14 +124,14 @@ public final class TransactionValidator {
           return false;
       }
       for (NormalTransactionOutputs out : outputs) {
-          if(out == null || out.pubkey() == null || out.value() < 0 || !HEX_64.matcher(out.pubkey()).matches()) {
+          if(out == null || out.pubkey() == null || out.value().signum() < 0 || !HEX_64.matcher(out.pubkey()).matches()) {
               return false;
           }
       }
       return true;
     }
 
-  private record OutputData(String pubkey, long value) {}
+  private record OutputData(String pubkey, BigInteger value) {}
 
   private static OutputData getOutputAt(TransactionDto dto, int index) {
       if (dto instanceof CoinbaseTransactionFields coinbase) {
