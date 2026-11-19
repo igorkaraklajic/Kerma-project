@@ -8,6 +8,7 @@ import Kerma.Dto.NormalTransaction.NormalTransactionInputs;
 import Kerma.Dto.NormalTransaction.NormalTransactionOutputs;
 import Kerma.Dto.Pair;
 import Kerma.Dto.TransactionDto;
+import Kerma.Dto.UTXO;
 import Kerma.NetworkManager;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -22,13 +23,16 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Pattern;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Set;
 
 public class BlockValidator {
 
   private static final ObjectMapper objectMapper = new ObjectMapper();
 
   public static int isBlockValid(BlockDto blockDto, Map<String, BlockEntry> knownBlocksEntryMap, String hash,
-                                 Map<String, TransactionDto> knownObjectsMap, Map<String, Pair> activeConnectionsMap) {
+                                 Map<String, TransactionDto> knownObjectsMap, Set<PrintWriter> activeConnectionsWriters) {
     //exact format checks
     if (blockDto.T() == null) {
       return -2;
@@ -37,6 +41,7 @@ public class BlockValidator {
       return -2;
     }
 
+    BlockEntry prevBlockEntry = null;
     String prevId = blockDto.previd();
     if (prevId == null){
       String officialGenesisHash = "00002fa163c7dab0991544424b9fd302bb1782b185e5a3bbdf12afb758e57dee";
@@ -50,10 +55,11 @@ public class BlockValidator {
         }
       }
       knownBlocksEntryMap.put(hash, new BlockEntry(0, blockDto, new HashSet<>()));
+      return 0;
     } else if (isValidHex(prevId)){
-      BlockEntry prevBlockEntry = knownBlocksEntryMap.get(prevId);
+      prevBlockEntry = knownBlocksEntryMap.get(prevId);
       if (prevBlockEntry == null) {
-        return -2; //this should never happen
+        return -8; //this should never happen
       }
       BlockDto prevBlock = prevBlockEntry.blockDto();
       if (prevBlock == null) {
@@ -103,68 +109,17 @@ public class BlockValidator {
     }
 
     // check the validity of txids
-    if (!verifyTxidsAreValid(blockDto, knownObjectsMap, activeConnectionsMap)) {
+    if (!verifyTxidsAreValid(blockDto, knownObjectsMap, activeConnectionsWriters)) {
       return -5;
     }
 
-    // check Coinbase presence and position rules
-    int pos = 0;
-    boolean found = false;
-    String cbTxid = null;
-    for (String txid : blockDto.txids()) {
-      TransactionDto tdto = knownObjectsMap.get(txid);
-      if (tdto instanceof CoinbaseTransactionFields && pos == 0) {
-        found = true;
-        cbTxid = txid;
-      }
-      if (tdto instanceof CoinbaseTransactionFields && pos != 0) {
-        return -6;
-      }
-      pos++;
+    UTXOExecutor.UtxoExecutionResult result = UTXOExecutor.executeBlock(blockDto, prevBlockEntry, knownObjectsMap);
+
+    if (result.statusCode() != 0) {
+      return result.statusCode();
     }
 
-    // validate Coinbase transaction
-    if (found) {
-      CoinbaseTransactionFields cb = (CoinbaseTransactionFields) knownObjectsMap.get(blockDto.txids()[0]);
-      if (cb == null || cb.outputs().length != 1) {
-        return -6;
-      }
-      int prevHeight = knownBlocksEntryMap.get(prevId).height();
-      if (prevHeight + 1 != cb.height()) {
-        return -6;
-      }
-
-      // calculate the total fee
-      BigInteger fee = BigInteger.ZERO;
-      for (String txid : blockDto.txids()) {
-        TransactionDto tdto = knownObjectsMap.get(txid);
-        if (tdto instanceof NormalTransactionFields) {
-          for (NormalTransactionInputs input : ((NormalTransactionFields) tdto).inputs()) {
-            String inputTxid = input.outpoint().txid();
-            int index = input.outpoint().index();
-
-            if (inputTxid.equals(cbTxid)) {
-            return -6;
-          }
-            TransactionDto inputTdto = knownObjectsMap.get(inputTxid);
-
-            if (inputTdto instanceof NormalTransactionFields) {
-              fee = fee.add(((NormalTransactionFields) inputTdto).outputs()[index].value());
-            } else if (inputTdto instanceof CoinbaseTransactionFields) {
-              fee = fee.add(((CoinbaseTransactionFields) inputTdto).outputs()[index].value());
-            }
-          }
-          for (NormalTransactionOutputs output : ((NormalTransactionFields) tdto).outputs()) {
-              fee = fee.subtract(output.value());
-          }
-        }
-      }
-
-      BigInteger feeValuePlusPicaker = fee.add(BigInteger.valueOf(50).multiply(BigInteger.TEN.pow(12)));
-      if (cb.outputs()[0].value().compareTo(feeValuePlusPicaker) > 0) {
-        return -6;
-      }
-    }
+    knownBlocksEntryMap.put(hash, new BlockEntry(prevBlockEntry.height() + 1, blockDto, result.newUTXOSet()));
     return 0;
   }
 
@@ -183,53 +138,54 @@ public class BlockValidator {
     return true;
   }
 
-  private static boolean verifyTxidsAreValid(BlockDto blockDto, Map<String, TransactionDto> knownObjectsMap, Map<String, Pair> activeConnectionsMap) {
+  private static boolean verifyTxidsAreValid(BlockDto blockDto, Map<String, TransactionDto> knownObjectsMap, Set<PrintWriter> activeConnectionsWriters) {
+    List<String> missing = new ArrayList<>();
     for (String txid : blockDto.txids()) {
-      if (!knownObjectsMap.containsKey(txid)) {
-        for (Map.Entry<String, Pair> entry : activeConnectionsMap.entrySet()) {
-          AtomicBoolean found_transaction = new AtomicBoolean(false);
-          Thread thread = new Thread(() -> {
-            var response = objectMapper.createObjectNode();
-            response.put("type", "getobject");
-            response.put("objectid", txid);
+      if (!knownObjectsMap.containsKey(txid) && !missing.contains(txid)) {
+        missing.add(txid);
+      }
+    }
+    if (missing.isEmpty()) {
+      return true;
+    }
 
-            Socket socket = entry.getValue().socket();
-            PrintWriter writer = entry.getValue().out();
-            BufferedReader reader = entry.getValue().in();
-            try {
-              writer.println(objectMapper.writeValueAsString(response));
-              socket.setSoTimeout(5000);
-
-              String line;
-              while (!socket.isClosed() && (line = reader.readLine()) != null) {
-                if (!line.isBlank()) {
-                  NetworkManager networkManager = new NetworkManager();
-                  networkManager.processMessage(socket, writer, line);
-                  if (knownObjectsMap.containsKey(txid)) {
-                    found_transaction.set(true);
-                  }
-                }
-              }
-            } catch (SocketTimeoutException e) {
-              System.err.println("Peer did not finish within 5 s");
-            } catch (IOException e) {
-              System.err.println("Could not send object: " + e.getMessage());
-            }
-          });
-          thread.start();
-
-          try {
-            thread.join(5000); // waiting for 5s, because thread is asynchronous
-          } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-          }
-
-          if (!found_transaction.get()) {
-            return false;
-          }
+    for (String txid : missing) {
+      var request = objectMapper.createObjectNode();
+      request.put("type", "getobject");
+      request.put("objectid", txid);
+      String jsonRequest;
+      try {
+        jsonRequest = objectMapper.writeValueAsString(request);
+      } catch (Exception e) {
+        return false;
+      }
+      for (PrintWriter writer : activeConnectionsWriters) {
+        synchronized (writer) {
+          writer.println(jsonRequest);
+          writer.flush();
         }
       }
     }
-    return true;
+
+    long deadline = System.currentTimeMillis() + 5000L;
+    while (System.currentTimeMillis() < deadline) {
+      boolean allFound = true;
+      for (String txid : missing) {
+        if (!knownObjectsMap.containsKey(txid)) {
+          allFound = false;
+          break;
+        }
+      }
+      if (allFound) {
+        return true;
+      }
+      try {
+        Thread.sleep(50);
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+        return false;
+      }
+    }
+    return false;
   }
 }

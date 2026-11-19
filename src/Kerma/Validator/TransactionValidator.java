@@ -95,7 +95,7 @@ public final class TransactionValidator {
 
             BigInteger sumOutputValues = BigInteger.ZERO;
             for (NormalTransactionOutputs outputs : normal.outputs()){
-                sumOutputValues = sumInputValues.add(outputs.value());
+                sumOutputValues = sumOutputValues.add(outputs.value());
             }
             if(sumInputValues.compareTo(sumOutputValues) < 0) {
                 return INVALID_TX_CONSERVATION;

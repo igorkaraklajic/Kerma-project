@@ -327,7 +327,7 @@ public class NetworkManager {
     }
 
     String objectId = json.get("objectid").asText();
-    if (knownObjectsMap.containsKey(objectId)) {
+    if (knownObjectsMap.containsKey(objectId) || knownBlocksEntryMap.containsKey(objectId)) {
       return;
     }
 
@@ -352,7 +352,10 @@ public class NetworkManager {
     }
 
     String objectId = json.get("objectid").asText();
-    TransactionDto object = knownObjectsMap.get(objectId);
+    Object object = knownObjectsMap.get(objectId);
+    if (object == null && knownBlocksEntryMap.containsKey(objectId)) {
+      object = knownBlocksEntryMap.get(objectId).blockDto();
+    }
     if (object == null) {
       sendError(writer, "UNKNOWN_OBJECT", "Requested object is not known");
       return;
@@ -397,24 +400,23 @@ public class NetworkManager {
           sendError(writer, "INVALID_FORMAT", "Invalid transaction format");
           try { socket.close(); } catch (IOException ignored) {}
           break;
-        case -4:
-          sendError(writer, "UNFINDABLE_OBJECT", "Outpoint index not found");
+        case 2:
+          sendError(writer, "INVALID_TX_OUTPOINT", "Outpoint index not found");
           try { socket.close(); } catch (IOException ignored) {}
           break;
-        case -3:
+        case 3:
           sendError(writer, "INVALID_TX_CONSERVATION", "Sum of inputs is less than sum of outputs");
           try { socket.close(); } catch (IOException ignored) {}
           break;
-        case -2:
-          sendError(writer, "UNKNOWN_OBJECT", "Signature verification failed");
+        case 4:
+          sendError(writer, "INVALID_TX_SIGNATURE", "Signature verification failed");
           try { socket.close(); } catch (IOException ignored) {}
           break;
         case -1:
-          sendError(writer, "INVALID_BLOCK_POW", "Transaction object not found");
+          sendError(writer, "UNKNOWN_OBJECT", "Transaction object not found");
           break;
         case 0:
-          byte[] payload = objectMapper.writeValueAsBytes(json.get("object"));
-          String hash = HashUtils.computeBlake2sHash(payload);
+          String hash = BlockHashUtils.computeBlockId(json.get("object"));
 
           if (!knownObjectsMap.containsKey(hash)) {
             knownObjectsMap.put(hash, transactionDto); //TODO: Check if there is a limit of entries
@@ -432,72 +434,76 @@ public class NetworkManager {
   }
 
   private void handleBlockObject(Socket socket, PrintWriter writer, JsonNode json) {
-    try {
       JsonNode blockNode = json.get("object");
 
       if (blockNode == null || !blockNode.isObject()) {
         sendError(writer, "INVALID_FORMAT", "Invalid block object");
-        socket.close();
-        return;
-      }
-      BlockDto blockDto = objectMapper.treeToValue(blockNode, BlockDto.class);
-
-      if (blockDto == null || blockDto.type() == null || !blockDto.type().equals("block")) {
-        sendError(writer, "INVALID_FORMAT", "Invalid object format");
         try { socket.close(); } catch (IOException ignored) {}
         return;
       }
+      new Thread(()->{
+        try {
+          BlockDto blockDto = objectMapper.treeToValue(blockNode, BlockDto.class);
 
-      String hash = BlockHashUtils.computeBlockId(blockNode);
+          if (blockDto == null || blockDto.type() == null || !blockDto.type().equals("block")) {
+            sendError(writer, "INVALID_FORMAT", "Invalid object format");
+            try { socket.close(); } catch (IOException ignored) {}
+            return;
+          }
 
-      if (knownBlocksEntryMap.containsKey(hash)) {
-        return;
-      }
+          String hash = BlockHashUtils.computeBlockId(blockNode);
 
-      int status = BlockValidator.isBlockValid(blockDto, knownBlocksEntryMap, hash, knownObjectsMap, activeConnectionsMap);
+          if (knownBlocksEntryMap.containsKey(hash)) {
+            return;
+          }
 
-      switch (status) {
-        case -1:
-          sendError(writer, "INVALID_GENESIS", "The block attempts to overwrite the genesis block");
+          int status = BlockValidator.isBlockValid(blockDto, knownBlocksEntryMap, hash, knownObjectsMap, activeConnectionsWriters);
+
+          switch (status) {
+            case -1:
+              sendError(writer, "INVALID_GENESIS", "The block attempts to overwrite the genesis block");
+              try { socket.close(); } catch (IOException ignored) {}
+              break;
+            case -2:
+              sendError(writer, "INVALID_FORMAT", "Invalid object format");
+              try { socket.close(); } catch (IOException ignored) {}
+              break;
+            case -3:
+              sendError(writer, "INVALID_BLOCK_POW", "Block " + hash + " does not meet mining target");
+              try { socket.close(); } catch (IOException ignored) {}
+              break;
+            case -4:
+              sendError(writer, "INVALID_BLOCK_TIMESTAMP", "Block " + hash +
+                      " contains a timestamp not strictly greater than that of the parent block, or is in the future");
+              try { socket.close(); } catch (IOException ignored) {}
+              break;
+            case -5:
+              sendError(writer, "UNFINDABLE_OBJECT",
+                      "The node could not verify an object because it failed to receive a dependent object after 5s");
+              break;
+            case -6:
+              sendError(writer, "INVALID_BLOCK_COINBASE",
+                      "a Coinbase transaction was either present at another index other than the first index or invalid");
+              try { socket.close(); } catch (IOException ignored) {}
+              break;
+            case -7:
+              sendError(writer, "INVALID_TX_OUTPOINT", " A transaction spends an output that is not in the UTXO set");
+              try { socket.close(); } catch (IOException ignored) {}
+              break;
+            case -8:
+              sendError(writer, "UNKNOWN_OBJECT", "Parent block not found");
+              break;
+            case 0:
+              broadcastObjectMsg(hash);
+              break;
+            default:
+              break;
+          }
+        } catch (IOException e) {
+          sendError(writer, "INVALID_FORMAT", "IO parsing error occurred");
           try { socket.close(); } catch (IOException ignored) {}
-          break;
-        case -2:
-          sendError(writer, "INVALID_FORMAT", "Invalid object format");
-          try { socket.close(); } catch (IOException ignored) {}
-          break;
-        case -3:
-          sendError(writer, "INVALID_BLOCK_POW", "Block " + hash + " does not meet mining target");
-          try { socket.close(); } catch (IOException ignored) {}
-          break;
-        case -4:
-          sendError(writer, "INVALID_BLOCK_TIMESTAMP", "Block " + hash +
-              " contains a timestamp not strictly greater than that of the parent block, or is in the future");
-          try { socket.close(); } catch (IOException ignored) {}
-          break;
-        case -5:
-          sendError(writer, "UNFINDABLE_OBJECT",
-              "The node could not verify an object because it failed to receive a dependent object after 5s");
-          break;
-        case -6:
-          sendError(writer, "INVALID_BLOCK_COINBASE",
-              "a Coinbase transaction was either present at another index other than the first index or invalid");
-          break;
-        case 0:
-          BlockEntry parentEntry = knownBlocksEntryMap.get(blockDto.previd());
-          int height = (parentEntry != null) ? parentEntry.height() + 1 : 1;
-          //TODO: here comes the creation of the UTXO and together with height, blockDto and the new UTXO set
-          //the knownBlocksEntryMap should be updated with the above placed in a BlockEntry as value and hash as a key, for now i use new HashSet
-          //also check in blockValidator around line 46 a new HashSet is created that maybe needs changing
-          BlockEntry newEntry = new BlockEntry(height, blockDto, new HashSet<>());
-          knownBlocksEntryMap.put(hash, newEntry);
-          break;
-        default:
-          break;
-      }
-    } catch (IOException e) {
-      sendError(writer, "INVALID_FORMAT", "IO parsing error occurred");
-      try { socket.close(); } catch (IOException ignored) {}
-    }
+        }
+      }).start();
   }
 
   private void broadcastObjectMsg(String objectId) {
